@@ -9,7 +9,7 @@
     isIeOrEdge,
     isPropagationStopped,
     onDocumentDragOver,
-    TOO_MANY_FILES_REJECTION
+    TOO_MANY_FILES_REJECTION,
   } from "./../utils/index";
   import { onMount, onDestroy, createEventDispatcher } from "svelte";
 
@@ -26,6 +26,7 @@
   export let multiple = true;
   export let preventDropOnDocument = true;
   export let noClick = false;
+  export let noDblClick = true;
   export let noKeyboard = false;
   export let noDrag = false;
   export let noDragEventsBubbling = false;
@@ -45,7 +46,7 @@
     isDragReject: false,
     draggedFiles: [],
     acceptedFiles: [],
-    fileRejections: []
+    fileRejections: [],
   };
 
   let rootRef;
@@ -91,7 +92,23 @@
 
   // Cb to open the file dialog when click occurs on the dropzone
   function onClickCb() {
-    if (noClick) {
+    if (noClick || !noDblClick) {
+      return;
+    }
+
+    // In IE11/Edge the file-browser dialog is blocking, therefore, use setTimeout()
+    // to ensure React can handle state changes
+    // See: https://github.com/react-dropzone/react-dropzone/issues/450
+    if (isIeOrEdge()) {
+      setTimeout(openFileDialog, 0);
+    } else {
+      openFileDialog();
+    }
+  }
+
+  // Cb to open the file dialog when click occurs on the dropzone
+  function onDblClickCb() {
+    if (noDblClick || !noClick) {
       return;
     }
 
@@ -112,7 +129,7 @@
     dragTargetsRef = [...dragTargetsRef, event.target];
 
     if (isEvtWithFiles(event)) {
-      Promise.resolve(getFilesFromEvent(event)).then(draggedFiles => {
+      Promise.resolve(getFilesFromEvent(event)).then((draggedFiles) => {
         if (isPropagationStopped(event) && !noDragEventsBubbling) {
           return;
         }
@@ -121,7 +138,7 @@
         state.isDragActive = true;
 
         dispatch("dragenter", {
-          dragEvent: event
+          dragEvent: event,
         });
       });
     }
@@ -139,7 +156,7 @@
 
     if (isEvtWithFiles(event)) {
       dispatch("dragover", {
-        dragEvent: event
+        dragEvent: event,
       });
     }
 
@@ -152,7 +169,7 @@
 
     // Only deactivate once the dropzone and all children have been left
     const targets = dragTargetsRef.filter(
-      target => rootRef && rootRef.contains(target)
+      (target) => rootRef && rootRef.contains(target)
     );
     // Make sure to remove a target present multiple times only once
     // (Firefox may fire dragenter/dragleave multiple times on the same element)
@@ -170,7 +187,7 @@
 
     if (isEvtWithFiles(event)) {
       dispatch("dragleave", {
-        dragEvent: event
+        dragEvent: event,
       });
     }
   }
@@ -182,7 +199,7 @@
     dragTargetsRef = [];
 
     if (isEvtWithFiles(event)) {
-      Promise.resolve(getFilesFromEvent(event)).then(files => {
+      Promise.resolve(getFilesFromEvent(event)).then((files) => {
         if (isPropagationStopped(event) && !noDragEventsBubbling) {
           return;
         }
@@ -190,20 +207,20 @@
         const acceptedFiles = [];
         const fileRejections = [];
 
-        files.forEach(file => {
+        files.forEach((file) => {
           const [accepted, acceptError] = fileAccepted(file, accept);
           const [sizeMatch, sizeError] = fileMatchSize(file, minSize, maxSize);
           if (accepted && sizeMatch) {
             acceptedFiles.push(file);
           } else {
-            const errors = [acceptError, sizeError].filter(e => e);
+            const errors = [acceptError, sizeError].filter((e) => e);
             fileRejections.push({ file, errors });
           }
         });
 
         if (!multiple && acceptedFiles.length > 1) {
           // Reject everything and empty accepted files
-          acceptedFiles.forEach(file => {
+          acceptedFiles.forEach((file) => {
             fileRejections.push({ file, errors: [TOO_MANY_FILES_REJECTION] });
           });
           acceptedFiles.splice(0);
@@ -215,20 +232,20 @@
         dispatch("drop", {
           acceptedFiles,
           fileRejections,
-          event
+          event,
         });
 
         if (fileRejections.length > 0) {
           dispatch("droprejected", {
             fileRejections,
-            event
+            event,
           });
         }
 
         if (acceptedFiles.length > 0) {
           dispatch("dropaccepted", {
             acceptedFiles,
-            event
+            event,
           });
         }
       });
@@ -302,6 +319,38 @@
   }
 </script>
 
+<div
+  bind:this={rootRef}
+  tabindex="0"
+  class="{disableDefaultStyles ? '' : 'dropzone'}
+  {containerClasses}"
+  style={containerStyles}
+  on:keydown={composeKeyboardHandler(onKeyDownCb)}
+  on:focus={composeKeyboardHandler(onFocusCb)}
+  on:blur={composeKeyboardHandler(onBlurCb)}
+  on:click={composeHandler(onClickCb)}
+  on:dblclick={composeHandler(onDblClickCb)}
+  on:dragenter={composeDragHandler(onDragEnterCb)}
+  on:dragover={composeDragHandler(onDragOverCb)}
+  on:dragleave={composeDragHandler(onDragLeaveCb)}
+  on:drop={composeDragHandler(onDropCb)}
+>
+  <input
+    {accept}
+    {multiple}
+    type="file"
+    autocomplete="off"
+    tabindex="-1"
+    on:change={onDropCb}
+    on:click={onInputElementClick}
+    bind:this={inputRef}
+    style="display: none;"
+  />
+  <slot>
+    <p>Drag 'n' drop some files here, or click to select files</p>
+  </slot>
+</div>
+
 <style>
   .dropzone {
     flex: 1;
@@ -322,32 +371,3 @@
     border-color: #2196f3;
   }
 </style>
-
-<div
-  bind:this={rootRef}
-  tabindex="0"
-  class="{disableDefaultStyles ? '' : 'dropzone'}
-  {containerClasses}"
-  style={containerStyles}
-  on:keydown={composeKeyboardHandler(onKeyDownCb)}
-  on:focus={composeKeyboardHandler(onFocusCb)}
-  on:blur={composeKeyboardHandler(onBlurCb)}
-  on:click={composeHandler(onClickCb)}
-  on:dragenter={composeDragHandler(onDragEnterCb)}
-  on:dragover={composeDragHandler(onDragOverCb)}
-  on:dragleave={composeDragHandler(onDragLeaveCb)}
-  on:drop={composeDragHandler(onDropCb)}>
-  <input
-    {accept}
-    {multiple}
-    type="file"
-    autocomplete="off"
-    tabindex="-1"
-    on:change={onDropCb}
-    on:click={onInputElementClick}
-    bind:this={inputRef}
-    style="display: none;" />
-  <slot>
-    <p>Drag 'n' drop some files here, or click to select files</p>
-  </slot>
-</div>
